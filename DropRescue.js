@@ -140,17 +140,21 @@ class Edge {
 
 class CollisionShape {
   
-    constructor(target, vertices = []) {
+    constructor(target, vertices = [], x_offset = 0, y_offset = 0) {
         this.edges = [];
         this.points = [];
         this.bounds = new PIXI.Bounds();
         this.intersectionPoint = new PIXI.Point();
         this.target = target;
-        this.vertices = vertices;
-                
-        for (let i = 0; i < vertices.length; i++) {
-            const p1 = vertices[i];
-            const p2 = vertices[i + 1] || vertices[0];
+        this.vertices = [];
+
+        for (let i = 0; i + 1 < vertices.length; i += 2) {
+            this.vertices.push(new PIXI.Point(vertices[i] + x_offset, vertices[i + 1] + y_offset));
+        }
+
+        for (let i = 0; i < this.vertices.length; i++) {
+            const p1 = this.vertices[i];
+            const p2 = this.vertices[i + 1] || this.vertices[0];
             this.points.push(p1.clone());
             this.edges.push(new Edge(p1, p2));
         }
@@ -299,23 +303,23 @@ let land = {
         let ten_ph = app.screen.height * .1;
         let one_pw = app.screen.width * .01;
         let ten_pw = app.screen.width * .09;
-        points.push(new PIXI.Point(0, app.screen.height));
-        points.push(new PIXI.Point(0, app.screen.height - Math.random() * ten_ph));
+        points.push(0, app.screen.height);
+        points.push(0, app.screen.height - Math.random() * ten_ph);
         let x = 0;
         do {
             x += Math.random() * ten_pw + one_pw;
             if (x > app.screen.width) {
                 x = app.screen.width;
             }
-            points.push(new PIXI.Point(x, app.screen.height - Math.random() * ten_ph));
+            points.push(x, app.screen.height - Math.random() * ten_ph);
         } while (x < app.screen.width);
-        points.push(new PIXI.Point(app.screen.width, app.screen.height));
-        points.push(new PIXI.Point(0, app.screen.height));
+        points.push(app.screen.width, app.screen.height);
+        points.push(0, app.screen.height);
 
         this.graphics = new PIXI.Graphics();
-        this.graphics.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-            this.graphics.lineTo(points[i].x, points[i].y);
+        this.graphics.moveTo(points[0], points[1]);
+        for (let i = 2; i < points.length; i += 2) {
+            this.graphics.lineTo(points[i], points[i + 1]);
         }
         this.graphics.closePath();
         this.graphics.fill(0xffffff);
@@ -344,11 +348,10 @@ let land = {
 
 
 function collision(object1, object2) {
-    // just a basic rectangle collision for now... we must do better
+    // just a basic rectangle collision for this
     const bounds1 = object1.getBounds();
     const bounds2 = object2.getBounds();
 
-    //console.log('comparing: ' + bounds1.x + ', ' + bounds1.y + ', ' + bounds1.width + ', ' + bounds1.height + ' with ' + bounds2.x + ', ' + bounds2.y + ', ' + bounds2.width + ', ' + bounds2.height);
     return bounds1.x < bounds2.x + bounds2.width
         && bounds1.x + bounds1.width > bounds2.x
         && bounds1.y < bounds2.y + bounds2.height
@@ -362,16 +365,21 @@ let asteroids = [];
 
 function add_asteroid() {
     // pick a random asteroid sprite sheet
-    let sheet = asteroid_sprite_sheet[Math.floor(asteroid_sprite_sheet.length * Math.random())];
+    let an = Math.floor(2 * Math.random());
+    //let an = Math.floor(asteroid_sprite_sheet.length * Math.random());
 
     // pick a random starting sequence
-    let starting_seq = Math.floor(asteroid_max_seq * Math.random());
+    let rotating = true;
+    let starting_seq = 0;
+    if (rotating) {
+        starting_seq = Math.floor(asteroid_max_seq * Math.random());
+    }
 
     // create the sprite with that starting sequence
-    let sprite = PIXI.Sprite.from(sheet.textures[`asteroid_${starting_seq}`]);
+    let sprite = PIXI.Sprite.from(asteroid_sprite_sheet[an].textures[`asteroid_${starting_seq}`]);
 
-    // pick a random scale from 0.25 to 1.0
-    let scale = 0.25 + 0.75 * Math.random();
+    // pick a random scale from 0.25 to 1.25
+    let scale = 0.25 + Math.random();
     sprite.scale.set(scale);
 
     // place the sprite randomly on the screen, but not overlapping with any other asteroid
@@ -393,12 +401,15 @@ function add_asteroid() {
     // create the asteroid object
     let asteroid = {
         // the spritesheet and the sprite
-        sheet: sheet,
+        an: an,
+        sheet: asteroid_sprite_sheet[an],
         sprite: sprite,
+        shape: new CollisionShape(sprite, asteroid_points[an][starting_seq], starting_seq % 7 * -128, Math.floor(starting_seq / 7) * -128),
 
         // the sequence of the sheet, and a sub-sequence for dealing with the animation speed
         seq: starting_seq,
         seq_sub: 0,
+        rotating: rotating,
 
         // the direction of rotation and movement
         rotational_speed: Math.random() * 2 - 1,    // between -1 and 1
@@ -407,17 +418,21 @@ function add_asteroid() {
         // advance the asteroid by one frame
         frame_advance: function () {
             // update the animation frame
-            this.seq_sub++;
-            if (this.seq_sub == 8) {
-                this.seq_sub = 0;
-                this.seq += this.rotational_speed;
-                if (this.seq > asteroid_max_seq) {
-                    this.seq -= asteroid_max_seq;
+            if (rotating) {
+                this.seq_sub++;
+                if (this.seq_sub == 8) {
+                    this.seq_sub = 0;
+                    this.seq += this.rotational_speed;
+                    if (this.seq > asteroid_max_seq) {
+                        this.seq -= asteroid_max_seq;
+                    }
+                    else if (this.seq < 0) {
+                        this.seq += asteroid_max_seq;
+                    }
+                    let seq = Math.floor(this.seq);
+                    this.sprite.texture = this.sheet.textures[`asteroid_${seq}`];
+                    this.shape = new CollisionShape(this.sprite, asteroid_points[this.an][seq], seq % 7 * -128, Math.floor(seq / 7) * -128);
                 }
-                else if (this.seq < 0) {
-                    this.seq += asteroid_max_seq;
-                }
-                this.sprite.texture = this.sheet.textures[`asteroid_${Math.floor(this.seq)}`];
             }
 
             // update the movement, and wrap around if necessary
@@ -428,6 +443,9 @@ function add_asteroid() {
             else if (this.sprite.x > app.screen.width + this.sprite.width) {
                 this.sprite.x = -this.sprite.width;
             }
+
+            // update the collision location
+            this.shape.update();
         }
     };
 
@@ -515,14 +533,14 @@ let spaceship = {
     },
 
     points: [
-        new PIXI.Point(14, 4),
-        new PIXI.Point(18, 4),
-        new PIXI.Point(27, 20),
-        new PIXI.Point(27, 26),
-        new PIXI.Point(19, 29),
-        new PIXI.Point(13, 29),
-        new PIXI.Point(5, 26),
-        new PIXI.Point(5, 20)
+        14, 4,
+        18, 4,
+        27, 20,
+        27, 26,
+        19, 29,
+        13, 29,
+        5, 26,
+        5, 20
     ]
 };
 
@@ -583,6 +601,7 @@ class Controller {
             app.stop();
             controller.paused = true;
             stars.reset();
+            land.reset();
             asteroids_reset();
             spaceship.reset();
             app.render();
@@ -648,6 +667,9 @@ class Controller {
 const controller = new Controller();
 
 
+// diagnostic graphics for collisions etc
+const graphics = new PIXI.Graphics();
+app.stage.addChild(graphics);
 
 
 function run() {
@@ -678,15 +700,23 @@ function run() {
             asteroid.frame_advance();
         }
 
+        graphics.clear().lineStyle(1, 0xffffff, 0.8);
+
         // check for collisions between ship and anything
-        /*
-        if (asteroids.some((asteroid) => collision(spaceship.sprite, asteroid.sprite))) {
-            app.stop();
+        let collided = false;
+        for (let a = 0; a < asteroids.length; a++) {
+            if (spaceship.shape.intersects(asteroids[a].shape)) {
+                collided = true;
+                graphics.poly(asteroids[a].shape.vertices).fill({ color: 0xffdf00 });
+            }
         }
-        */
 
         // check for collisions between ship and land
-        let collided = land.shape.intersects(spaceship.shape)
+        if (land.shape.intersects(spaceship.shape)) {
+            collided = true;
+        }
+
+        // set the spaceship color based on collision
         spaceship.hit(collided);
     });
 
