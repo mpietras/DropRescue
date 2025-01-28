@@ -8,6 +8,7 @@ const assets_sources = [
     { alias: 'asteroid2', src: 'resources/asteroid2.png' },
     { alias: 'asteroid3', src: 'resources/asteroid3.png' },
     { alias: 'rocks', src: 'resources/rocks.jpg' },
+    { alias: 'explosion', src: 'resources/explosion.png' },
 ];
 let assets = null;
 
@@ -35,24 +36,73 @@ const asteroid_max_seq = 46;
 
 
 // set up the spaceship sprite sheet
-let spaceship_sprite_sheet_source = {
+let spaceship_sprite = {
+    sheet: null,
     frames: {
     },
     meta: {
-        size: { w: 192, h: 256 },
         scale: 1
+    },
+    create: function () {
+        // set up the frames
+        for (let i = 0; i < 6; i++) {
+            this.frames[`thrust_${i}`] = {
+                frame: { x: i * 32, y: 0, w: 32, h: 32 },
+                sourceSize: { w: 32, h: 32 },
+                spriteSourceSize: { x: 0, y: 0, w: 32, h: 32 }
+            };
+        }
+
+        // create the sprite sheet
+        this.sheet = new PIXI.Spritesheet(
+            PIXI.Texture.from('spaceship'),
+            this
+        );
+
+        // parse the sprite sheet returning the promise
+        return this.sheet.parse();
     }
 };
 
-for (let i = 0; i < 6; i++) {
-    spaceship_sprite_sheet_source.frames[`thrust_${i}`] = {
-        frame: { x: i * 32, y: 0, w: 32, h: 32 },
-        sourceSize: { w: 32, h: 32 },
-        spriteSourceSize: { x: 0, y: 0, w: 32, h: 32 }
-    };
-}
 
-let spaceship_sprite_sheet = null;
+
+let explosion_sprite = {
+    sheet: null,
+    frames: {
+    },
+    meta: {
+        scale: 1
+    },
+    create: function () {
+        // set up the frames
+        for (let i = 0; i < 37; i++) {
+            this.frames[`explode_${i}`] = {
+                frame: { x: i * 64, y: 0, w: 64, h: 64 },
+                sourceSize: { w: 64, h: 64 },
+                spriteSourceSize: { x: 0, y: 0, w: 64, h: 64 }
+            };
+        }
+
+        // create the sprite sheet
+        this.sheet = new PIXI.Spritesheet(
+            PIXI.Texture.from('explosion'),
+            this
+        );
+
+        // parse the sprite sheet returning the promise
+        return this.sheet.parse();
+    }
+};
+
+
+
+function create_scene_and_run() {
+    stars.create();
+    land.create();
+    asteroids_create();
+    spaceship.create();
+    run();
+}
 
 
 
@@ -64,16 +114,8 @@ function asteroid_sheet_parser(i) {
             asteroid_sheet_parser(i + 1);
         }
         else {
-            spaceship_sprite_sheet = new PIXI.Spritesheet(
-                PIXI.Texture.from('spaceship'),
-                spaceship_sprite_sheet_source
-            );
-            spaceship_sprite_sheet.parse().then(() => {
-                stars.create();
-                land.create();
-                asteroids_create();
-                spaceship.create();
-                run();
+            spaceship_sprite.create().then(() => {
+                explosion_sprite.create().then(create_scene_and_run);
             });
         }
     });
@@ -262,19 +304,19 @@ app.stage.addChild(help_text);
 
 // put the stars out
 let stars = {
-    count: 20,
+    count: 100,
     graphics: null,
 
     create: function () {
         this.graphics = new PIXI.Graphics();
 
         for (let index = 0; index < this.count; index++) {
+            // pick a random location, size, and color
             const x = Math.random() * app.screen.width;
             const y = Math.random() * app.screen.height;
-            const radius = 2 + Math.random() * 3;
-            const rotation = Math.random() * Math.PI * 2;
-
-            this.graphics.star(x, y, 5, radius, 0, rotation).fill({ color: 0xffdf00, alpha: radius / 5 });
+            const radius = Math.random() * .002 * app.screen.height;
+            const color = 0xff0000 + Math.floor(Math.random() * 255) * 256 + Math.floor(Math.random() * 255);
+            this.graphics.circle(x, y, radius).fill({ color: color });
         }
 
         app.stage.addChild(this.graphics);
@@ -324,11 +366,13 @@ let land = {
         this.graphics.closePath();
         this.graphics.fill(0xffffff);
     
-        this.sprite = new PIXI.TilingSprite(land_texture, app.screen.width, app.screen.height);
+        this.sprite = new PIXI.TilingSprite({
+            texture: land_texture, width: app.screen.width, height: app.screen.height, tilePosition: { x: Math.random() * 100, y: 100 }
+        });
         this.sprite.x = 0;
         this.sprite.y = 0;
         this.sprite.addChild(this.graphics);
-        this.sprite.tileScale.set(0.2);
+        this.sprite.tileScale.set(0.1);
         this.sprite.setMask({
             mask: this.graphics
         });
@@ -347,26 +391,12 @@ let land = {
 
 
 
-function collision(object1, object2) {
-    // just a basic rectangle collision for this
-    const bounds1 = object1.getBounds();
-    const bounds2 = object2.getBounds();
-
-    return bounds1.x < bounds2.x + bounds2.width
-        && bounds1.x + bounds1.width > bounds2.x
-        && bounds1.y < bounds2.y + bounds2.height
-        && bounds1.y + bounds1.height > bounds2.y;
-}
-
-
-
 // our list of asteroids
 let asteroids = [];
 
 function add_asteroid() {
     // pick a random asteroid sprite sheet
-    let an = Math.floor(2 * Math.random());
-    //let an = Math.floor(asteroid_sprite_sheet.length * Math.random());
+    let an = Math.floor(asteroid_sprite_sheet.length * Math.random());
 
     // pick a random starting sequence
     let rotating = true;
@@ -378,22 +408,13 @@ function add_asteroid() {
     // create the sprite with that starting sequence
     let sprite = PIXI.Sprite.from(asteroid_sprite_sheet[an].textures[`asteroid_${starting_seq}`]);
 
-    // pick a random scale from 0.25 to 1.25
-    let scale = 0.25 + Math.random();
+    // pick a random scale that results in 2%-15% of the height as radius
+    let scale = (app.screen.height * .13 * Math.random() + app.screen.height * .02) / 128;
     sprite.scale.set(scale);
 
-    // place the sprite randomly on the screen, but not overlapping with any other asteroid
-    let collision_found = 0;
-    do {
-        sprite.x = app.screen.width * Math.random();
-        sprite.y = Math.floor(Math.floor((app.screen.height - 200) / 100) * Math.random()) * 100 + 100;
-        if (asteroids.some((asteroid) => collision(sprite, asteroid.sprite))) {
-            collision_found++;
-        }
-        else {
-            break;
-        }
-    } while (collision_found < 30);
+    // place the sprite randomly on the screen, but not in the top 10% or the bottom 25% (15% asteroid, 10% land)
+    sprite.x = app.screen.width * Math.random();
+    sprite.y = app.screen.height * .65 * Math.random() + app.screen.height * .1;
 
     // put it in our stage
     app.stage.addChild(sprite);
@@ -412,7 +433,7 @@ function add_asteroid() {
         rotating: rotating,
 
         // the direction of rotation and movement
-        rotational_speed: Math.random() * 2 - 1,    // between -1 and 1
+        rotational_speed: Math.random() * 4 - 2,    // between -2 and 2
         movement_speed: Math.random() * 6 - 3,  // between -3 and 3
 
         // advance the asteroid by one frame
@@ -475,35 +496,100 @@ function asteroids_reset() {
 
 
 
+// the main spaceship exploding
+let explosion = {
+    sprite: null,
+    seq: -1,    // not running
+    seq_sub: 0,
+
+    start: function () {
+        if (this.seq == -1) {
+            this.seq = 0;
+            this.seq_sub = 0;
+
+            // create the sprite
+            this.sprite = PIXI.Sprite.from(explosion_sprite.sheet.textures['explode_0']);
+
+            // set to where the ship is
+            this.sprite.anchor.set(0.5);
+            this.sprite.x = spaceship.sprite.x;
+            this.sprite.y = spaceship.sprite.y;
+
+            // scale the explosion to about 5% of the height
+            let scale = app.screen.height * .05 / this.sprite.height;
+            this.sprite.scale.set(scale);
+            app.stage.addChild(this.sprite);
+        }
+    },
+
+    frame_advance: function () {
+        if (this.seq == -1) {
+            return;
+        }
+        this.seq_sub++;
+        if (this.seq_sub == 2) {
+            this.seq_sub = 0;
+            this.seq++;
+            if (this.seq < 36) {
+                this.sprite.texture = explosion_sprite.sheet.textures[`explode_${this.seq}`];
+            }
+            else {
+                this.reset();
+                app.stop();
+            }
+        }
+    },
+
+    reset: function () {
+        if (this.sprite) {
+            app.stage.removeChild(this.sprite);
+            this.sprite = null;
+        }
+        this.seq = -1;
+        this.seq_sub = 0;
+    }
+};
+
+
 // the main spaceship
 let spaceship = {
     sprite: null,
     thrust_level: 0,
     thrust_acceleration: 0,
-    velocity: 0,
+    velocity: { x: 0, y: 0 },
+    rotation: 0,
     acceleration_due_to_gravity: 0,
     shape: null,
 
     create: function () {
-        this.sprite = PIXI.Sprite.from(spaceship_sprite_sheet.textures['thrust_0']);
+        this.sprite = PIXI.Sprite.from(spaceship_sprite.sheet.textures['thrust_0']);
 
         app.stage.addChild(this.sprite);
 
-        this.sprite.x = app.screen.width / 2;
-        this.sprite.y = app.screen.height / 2;
-        this.shape = new CollisionShape(this.sprite, this.points);
+        // scale the ship to about 5% of the height
+        let scale = app.screen.height * .05 / this.sprite.height;
+        this.sprite.scale.set(scale);
 
-        const spaceship_height_meters = 8;
-        const gravity = 9.8 * 10;            // assume earth gravity in m/s^2
-        const pixels_per_meter = this.sprite.height / spaceship_height_meters;
+        // place the ship at the top of the screen
+        this.sprite.anchor.set(0.5);
+        this.sprite.x = app.screen.width / 2;
+        this.sprite.y = this.sprite.height / 2;
+
+        // create the shape from the points
+        this.shape = new CollisionShape(this.sprite, this.points, -16, -16);
+
+        this.velocity = { x: 0, y: 0 };
+        this.rotation = 0;
         const frames_per_second = 60;
-        this.velocity = 0; // px/frame
-        this.acceleration_due_to_gravity = gravity / pixels_per_meter / frames_per_second / frames_per_second;    // px/frame^2
+        this.acceleration_due_to_gravity = app.screen.height * .1 / frames_per_second / frames_per_second;
         this.thrust_level = 0;
-        this.thrust_acceleration = this.acceleration_due_to_gravity / 2; // px/frame^2
+        this.thrust_acceleration = this.acceleration_due_to_gravity / 2;
     },
 
     hit: function(collision) {
+        if (!this.sprite) {
+            return;
+        }
         if (collision) {
             this.sprite.tint = 0xff0000;
         }
@@ -512,23 +598,74 @@ let spaceship = {
         }
     },
 
-    frame_advance: function (thrust_level_new) {
-        // update the sprite if the thrust level changed
-        if (thrust_level_new !== spaceship.thrust_level) {
-            spaceship.thrust_level = thrust_level_new;
-            spaceship.sprite.texture = spaceship_sprite_sheet.textures[`thrust_${spaceship.thrust_level}`];
+    frame_advance: function () {
+        if (!this.sprite) {
+            return;
         }
 
-        // update the velocity and position
-        this.velocity += this.acceleration_due_to_gravity - this.thrust_level * this.thrust_acceleration;
-        this.sprite.y += this.velocity;
+        // check for placeholder left/right controller input
+        if (controller.keys.right.pressed || controller.ptr.right) {
+            this.rotation += 3;
+            if (this.rotation >= 360) {
+                this.rotation -= 360;
+            }
+            this.sprite.rotation = this.rotation * Math.PI / 180;
+        }
+        else if (controller.keys.left.pressed || controller.ptr.left) {
+            this.rotation -= 3;
+            if (this.rotation < 0) {
+                this.rotation += 360;
+            }
+            this.sprite.rotation = this.rotation * Math.PI / 180;
+        }
+
+        // check for controller thrust input
+        let thrust_level_new;
+        if (controller.keys.down.pressed) {
+            thrust_level_new = Math.min(this.thrust_level + 1, 5);
+        }
+        else {
+            thrust_level_new = Math.max(this.thrust_level - 1, 0);
+        }
+
+        // update the sprite if the thrust level changed
+        if (thrust_level_new !== this.thrust_level) {
+            this.thrust_level = thrust_level_new;
+            this.sprite.texture = spaceship_sprite.sheet.textures[`thrust_${this.thrust_level}`];
+        }
+
+        // figure out how to apply the thrust
+        if (this.thrust_level > 0) {
+            // apply the thrust in the direction of the ship
+            let thrust_x = Math.sin(this.rotation * Math.PI / 180) * this.thrust_level * this.thrust_acceleration;
+            let thrust_y = -Math.cos(this.rotation * Math.PI / 180) * this.thrust_level * this.thrust_acceleration;
+            this.velocity.x += thrust_x;
+            this.velocity.y += thrust_y;
+        }
+
+        // update the velocity due to gravity
+        this.velocity.y += this.acceleration_due_to_gravity;
+
+        // update the new position
+        this.sprite.x += this.velocity.x;
+        this.sprite.y += this.velocity.y;
 
         // update the collision location
         this.shape.update();
     },
 
+    end: function () {
+        if (this.sprite) {
+            app.stage.removeChild(this.sprite);
+            this.sprite = null;
+        }
+    },
+
     reset: function () {
-        app.stage.removeChild(this.sprite);
+        if (this.sprite) {
+            app.stage.removeChild(this.sprite);
+            this.sprite = null;
+        }
         this.create();
     },
 
@@ -604,6 +741,7 @@ class Controller {
             land.reset();
             asteroids_reset();
             spaceship.reset();
+            explosion.reset();
             app.render();
         }
 
@@ -675,39 +813,19 @@ app.stage.addChild(graphics);
 function run() {
     // the main game loop
     app.ticker.add((time) => {
-        // check for placeholder left/right controller input
-        if (controller.keys.right.pressed || controller.ptr.right) {
-            spaceship.sprite.x += 2;
-        }
-        else if (controller.keys.left.pressed || controller.ptr.left) {
-            spaceship.sprite.x -= 2;
-        }
-
-        // check for controller thrust input
-        let thrust_level_new;
-        if (controller.keys.down.pressed) {
-            thrust_level_new = Math.min(spaceship.thrust_level + 1, 5);
-        }
-        else {
-            thrust_level_new = Math.max(spaceship.thrust_level - 1, 0);
-        }
-
         // update the spaceship with the new thrust level
-        spaceship.frame_advance(thrust_level_new);
+        spaceship.frame_advance();
 
         // update the asteroids
         for (let asteroid of asteroids) {
             asteroid.frame_advance();
         }
 
-        graphics.clear().lineStyle(1, 0xffffff, 0.8);
-
         // check for collisions between ship and anything
         let collided = false;
         for (let a = 0; a < asteroids.length; a++) {
             if (spaceship.shape.intersects(asteroids[a].shape)) {
                 collided = true;
-                graphics.poly(asteroids[a].shape.vertices).fill({ color: 0xffdf00 });
             }
         }
 
@@ -718,6 +836,12 @@ function run() {
 
         // set the spaceship color based on collision
         spaceship.hit(collided);
+
+        if (collided) {
+            explosion.start();
+            spaceship.end();
+        }
+        explosion.frame_advance();
     });
 
 
