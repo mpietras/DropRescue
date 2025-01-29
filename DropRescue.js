@@ -14,27 +14,6 @@ let assets = null;
 
 
 
-// set up the asteroid sprite sheets
-let asteroid_sprite_sheet = [];
-let asteroid_sheet_source = {
-    frames: {
-    },
-    meta: {
-        size: { w: 896, h: 896 },
-        scale: 1
-    }
-};
-for (let i = 0; i < 47; i++) {
-    asteroid_sheet_source.frames[`asteroid_${i}`] = {
-        frame: { x: i % 7 * 128, y: Math.floor(i / 7) * 128, w: 128, h: 128 },
-        sourceSize: { w: 128, h: 128 },
-        spriteSourceSize: { x: 0, y: 0, w: 128, h: 128 }
-    };
-}
-const asteroid_max_seq = 46;
-
-
-
 // set up the spaceship sprite sheet
 let spaceship_sprite = {
     sheet: null,
@@ -96,93 +75,216 @@ let explosion_sprite = {
 
 
 
-function create_scene_and_run() {
-    stars.create();
-    land.create();
-    asteroids_create();
-    spaceship.create();
-    run();
-}
-
-
-
-function asteroid_sheet_parser(i) {
-    let sheet = new PIXI.Spritesheet(PIXI.Texture.from(`asteroid${i + 1}`), asteroid_sheet_source);
-    sheet.parse().then(() => {
-        asteroid_sprite_sheet.push(sheet);
-        if (i < 2) {
-            asteroid_sheet_parser(i + 1);
+// our list of asteroids
+let asteroids = {
+    active: [],
+    sheets: [],
+    source: {
+        frames: {
+        },
+        meta: {
+            size: { w: 896, h: 896 },
+            scale: 1
         }
-        else {
-            spaceship_sprite.create().then(() => {
-                explosion_sprite.create().then(create_scene_and_run);
-            });
+    },
+    max_seq: 47,
+
+    init: function(i) {
+        for (let i = 0; i<= this.max_seq; i++) {
+            this.source.frames[`asteroid_${i}`] = {
+                frame: { x: i % 7 * 128, y: Math.floor(i / 7) * 128, w: 128, h: 128 },
+                sourceSize: { w: 128, h: 128 },
+                spriteSourceSize: { x: 0, y: 0, w: 128, h: 128 }
+            };
         }
-    });
-}
+
+        let sheet = new PIXI.Spritesheet(PIXI.Texture.from(`asteroid${i + 1}`), this.source);
+        this.sheets.push(sheet);
+        return sheet.parse();
+    },
+
+    add: function () {
+        // pick a random asteroid sprite sheet
+        let an = Math.floor(this.sheets.length * Math.random());
+
+        // pick a random starting sequence
+        let rotating = true;
+        let starting_seq = 0;
+        if (rotating) {
+            starting_seq = Math.floor(this.max_seq * Math.random());
+        }
+
+        // create the sprite with that starting sequence
+        let sprite = PIXI.Sprite.from(this.sheets[an].textures[`asteroid_${starting_seq}`]);
+
+        // pick a random scale that results in 2%-15% of the height as radius
+        let scale = (app.screen.height * .13 * Math.random() + app.screen.height * .02) / 128;
+        sprite.scale.set(scale);
+
+        // place the sprite randomly on the screen, but not in the top 10% or the bottom 25% (15% asteroid, 10% land)
+        sprite.x = app.screen.width * Math.random();
+        sprite.y = app.screen.height * .65 * Math.random() + app.screen.height * .1;
+
+        // put it in our stage
+        app.stage.addChild(sprite);
+
+        // create the asteroid object
+        let asteroid = {
+            // the spritesheet and the sprite
+            points: asteroid_points[an],
+            sheet: this.sheets[an],
+            sprite: sprite,
+            max_seq: this.max_seq,
+            shape: new CollisionShape(sprite, asteroid_points[an][starting_seq], starting_seq % 7 * -128, Math.floor(starting_seq / 7) * -128),
+
+            // the sequence of the sheet, and a sub-sequence for dealing with the animation speed
+            seq: starting_seq,
+            seq_sub: 0,
+            rotating: rotating,
+
+            // the direction of rotation and movement
+            rotational_speed: Math.random() * 4 - 2,    // between -2 and 2
+            movement_speed: Math.random() * 6 - 3,  // between -3 and 3
+
+            // advance the asteroid by one frame
+            frame_advance: function () {
+                // update the animation frame
+                if (rotating) {
+                    this.seq_sub++;
+                    if (this.seq_sub == 8) {
+                        this.seq_sub = 0;
+                        this.seq += this.rotational_speed;
+                        if (this.seq > this.max_seq) {
+                            this.seq -= this.max_seq;
+                        }
+                        else if (this.seq < 0) {
+                            this.seq += this.max_seq;
+                        }
+                        let seq = Math.floor(this.seq);
+                        this.sprite.texture = this.sheet.textures[`asteroid_${seq}`];
+                        this.shape = new CollisionShape(this.sprite, this.points[seq], seq % 7 * -128, Math.floor(seq / 7) * -128);
+                    }
+                }
+
+                // update the movement, and wrap around if necessary
+                this.sprite.x += this.movement_speed;
+                if (this.sprite.x < -this.sprite.width) {
+                    this.sprite.x = app.screen.width + this.sprite.width;
+                }
+                else if (this.sprite.x > app.screen.width + this.sprite.width) {
+                    this.sprite.x = -this.sprite.width;
+                }
+
+                // update the collision location
+                this.shape.update();
+            }
+        };
+
+        // save this asteroid in our list
+        this.active.push(asteroid);
+    },
+
+    create: function () {
+        // create a bunch of asteroids
+        for (let i = 0; i < 20; i++) {
+            this.add();
+        }
+    },
+
+    reset: function () {
+        // remove all the asteroids
+        for (let asteroid of this.active) {
+            app.stage.removeChild(asteroid.sprite);
+        }
+
+        // clear the list
+        this.active = [];
+
+        // create a new set of asteroids
+        this.create();
+    }
+};
+
+
 
 // when document loads, start initializing the game
 document.addEventListener('DOMContentLoaded', () => {
     app.init({ background: '#000022', resizeTo: window, autoStart: !start_paused }).then(() => {
         document.body.appendChild(app.canvas);
-        assets = PIXI.Assets.load(assets_sources).then(() => {
-            asteroid_sheet_parser(0);
-        });
+        assets = PIXI.Assets.load(assets_sources)
+            .then(() => {
+                return asteroids.init(0);
+            }).then(() => {
+                return asteroids.init(1);
+            }).then(() => {
+                return asteroids.init(2);
+            }).then(() => {
+                return spaceship_sprite.create();
+            }).then(() => {
+                return explosion_sprite.create();
+            }).then(() => {
+                stars.create();
+                land.create();
+                asteroids.create();
+                spaceship.create();
+                run();
+            });
     });
 });
 
 
 
-class Edge {
-  
-    constructor(p1 = new PIXI.Point(), p2 = new PIXI.Point()) {
-        this.p1 = p1;
-        this.p2 = p2;
-    }
-  
-    intersects(edge, asSegment = true, point = new PIXI.Point()) {
-        const a = this.p1;
-        const b = this.p2;
-        const e = edge.p1;
-        const f = edge.p2;
-    
-        const a1 = b.y - a.y;
-        const a2 = f.y - e.y;
-        const b1 = a.x - b.x;
-        const b2 = e.x - f.x;
-        const c1 = (b.x * a.y) - (a.x * b.y);
-        const c2 = (f.x * e.y) - (e.x * f.y);
-        const denom = (a1 * b2) - (a2 * b1);
-    
-        if (denom === 0) {
-            return null;
-        }
-       
-        point.x = ((b1 * c2) - (b2 * c1)) / denom;
-        point.y = ((a2 * c1) - (a1 * c2)) / denom;
-
-        if (asSegment) {
-            const uc = ((f.y - e.y) * (b.x - a.x) - (f.x - e.x) * (b.y - a.y));
-            const ua = (((f.x - e.x) * (a.y - e.y)) - (f.y - e.y) * (a.x - e.x)) / uc;
-            const ub = (((b.x - a.x) * (a.y - e.y)) - ((b.y - a.y) * (a.x - e.x))) / uc;
-
-            if (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1) {
-                return point;
-            }
-            else {
-                return null;
-            }
-        }
-
-        return point;
-    }
-}
 
 
 
 class CollisionShape {
   
     constructor(target, vertices = [], x_offset = 0, y_offset = 0) {
+        this.Edge = class {
+        
+            constructor(p1 = new PIXI.Point(), p2 = new PIXI.Point()) {
+                this.p1 = p1;
+                this.p2 = p2;
+            }
+        
+            intersects(edge, asSegment = true, point = new PIXI.Point()) {
+                const a = this.p1;
+                const b = this.p2;
+                const e = edge.p1;
+                const f = edge.p2;
+            
+                const a1 = b.y - a.y;
+                const a2 = f.y - e.y;
+                const b1 = a.x - b.x;
+                const b2 = e.x - f.x;
+                const c1 = (b.x * a.y) - (a.x * b.y);
+                const c2 = (f.x * e.y) - (e.x * f.y);
+                const denom = (a1 * b2) - (a2 * b1);
+            
+                if (denom === 0) {
+                    return null;
+                }
+            
+                point.x = ((b1 * c2) - (b2 * c1)) / denom;
+                point.y = ((a2 * c1) - (a1 * c2)) / denom;
+
+                if (asSegment) {
+                    const uc = ((f.y - e.y) * (b.x - a.x) - (f.x - e.x) * (b.y - a.y));
+                    const ua = (((f.x - e.x) * (a.y - e.y)) - (f.y - e.y) * (a.x - e.x)) / uc;
+                    const ub = (((b.x - a.x) * (a.y - e.y)) - ((b.y - a.y) * (a.x - e.x))) / uc;
+
+                    if (ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1) {
+                        return point;
+                    }
+                    else {
+                        return null;
+                    }
+                }
+
+                return point;
+            }
+        };
+
         this.edges = [];
         this.points = [];
         this.bounds = new PIXI.Bounds();
@@ -198,7 +300,7 @@ class CollisionShape {
             const p1 = this.vertices[i];
             const p2 = this.vertices[i + 1] || this.vertices[0];
             this.points.push(p1.clone());
-            this.edges.push(new Edge(p1, p2));
+            this.edges.push(new this.Edge(p1, p2));
         }
     
         this.update();
@@ -390,110 +492,32 @@ let land = {
 };
 
 
+let game_over = {
+    text: null,
+    
+    create: function () {
+        this.text = new PIXI.Text(
+            'GAME OVER',
+            { fontFamily: 'Arial', fontSize: 120, fill: 0, align: 'center', stroke: 0xffdddd, strokeThickness: 2 }
+        );
 
-// our list of asteroids
-let asteroids = [];
+        this.text.anchor.set(0.5);
+        this.text.x = app.screen.width / 2;
+        this.text.y = app.screen.height / 2;
+        let fx = this.text.width / this.text.height;
+        this.text.width = app.screen.width;
+        this.text.height = app.screen.height / fx;
 
-function add_asteroid() {
-    // pick a random asteroid sprite sheet
-    let an = Math.floor(asteroid_sprite_sheet.length * Math.random());
+        app.stage.addChild(this.text);
+    },
 
-    // pick a random starting sequence
-    let rotating = true;
-    let starting_seq = 0;
-    if (rotating) {
-        starting_seq = Math.floor(asteroid_max_seq * Math.random());
-    }
-
-    // create the sprite with that starting sequence
-    let sprite = PIXI.Sprite.from(asteroid_sprite_sheet[an].textures[`asteroid_${starting_seq}`]);
-
-    // pick a random scale that results in 2%-15% of the height as radius
-    let scale = (app.screen.height * .13 * Math.random() + app.screen.height * .02) / 128;
-    sprite.scale.set(scale);
-
-    // place the sprite randomly on the screen, but not in the top 10% or the bottom 25% (15% asteroid, 10% land)
-    sprite.x = app.screen.width * Math.random();
-    sprite.y = app.screen.height * .65 * Math.random() + app.screen.height * .1;
-
-    // put it in our stage
-    app.stage.addChild(sprite);
-
-    // create the asteroid object
-    let asteroid = {
-        // the spritesheet and the sprite
-        an: an,
-        sheet: asteroid_sprite_sheet[an],
-        sprite: sprite,
-        shape: new CollisionShape(sprite, asteroid_points[an][starting_seq], starting_seq % 7 * -128, Math.floor(starting_seq / 7) * -128),
-
-        // the sequence of the sheet, and a sub-sequence for dealing with the animation speed
-        seq: starting_seq,
-        seq_sub: 0,
-        rotating: rotating,
-
-        // the direction of rotation and movement
-        rotational_speed: Math.random() * 4 - 2,    // between -2 and 2
-        movement_speed: Math.random() * 6 - 3,  // between -3 and 3
-
-        // advance the asteroid by one frame
-        frame_advance: function () {
-            // update the animation frame
-            if (rotating) {
-                this.seq_sub++;
-                if (this.seq_sub == 8) {
-                    this.seq_sub = 0;
-                    this.seq += this.rotational_speed;
-                    if (this.seq > asteroid_max_seq) {
-                        this.seq -= asteroid_max_seq;
-                    }
-                    else if (this.seq < 0) {
-                        this.seq += asteroid_max_seq;
-                    }
-                    let seq = Math.floor(this.seq);
-                    this.sprite.texture = this.sheet.textures[`asteroid_${seq}`];
-                    this.shape = new CollisionShape(this.sprite, asteroid_points[this.an][seq], seq % 7 * -128, Math.floor(seq / 7) * -128);
-                }
-            }
-
-            // update the movement, and wrap around if necessary
-            this.sprite.x += this.movement_speed;
-            if (this.sprite.x < -this.sprite.width) {
-                this.sprite.x = app.screen.width + this.sprite.width;
-            }
-            else if (this.sprite.x > app.screen.width + this.sprite.width) {
-                this.sprite.x = -this.sprite.width;
-            }
-
-            // update the collision location
-            this.shape.update();
+    reset: function () {
+        if (this.text) {
+            app.stage.removeChild(this.text);
+            this.text = null;
         }
-    };
-
-    // save this asteroid in our list
-    asteroids.push(asteroid);
-}
-
-function asteroids_create() {
-    // create a bunch of asteroids
-    for (let i = 0; i < 20; i++) {
-        add_asteroid();
     }
-}
-
-function asteroids_reset() {
-    // remove all the asteroids
-    for (let asteroid of asteroids) {
-        app.stage.removeChild(asteroid.sprite);
-    }
-
-    // clear the list
-    asteroids = [];
-
-    // create a new set of asteroids
-    asteroids_create();
-}
-
+};
 
 
 // the main spaceship exploding
@@ -535,6 +559,7 @@ let explosion = {
             }
             else {
                 this.reset();
+                game_over.create();
                 app.stop();
             }
         }
@@ -683,24 +708,21 @@ let spaceship = {
 
 
 
-// Keyboard mapping for the game.
-const keyMap = {
-    Space: 'space',
-    KeyW: 'up',
-    ArrowUp: 'up',
-    KeyA: 'left',
-    ArrowLeft: 'left',
-    KeyS: 'down',
-    ArrowDown: 'down',
-    KeyD: 'right',
-    ArrowRight: 'right',
-};
-
-
-// class for handling keyboard inputs.
 class Controller {
     constructor() {
         this.paused = start_paused;
+
+        this.keyMap = {
+            Space: 'space',
+            KeyW: 'up',
+            ArrowUp: 'up',
+            KeyA: 'left',
+            ArrowLeft: 'left',
+            KeyS: 'down',
+            ArrowDown: 'down',
+            KeyD: 'right',
+            ArrowRight: 'right',
+        };
 
         this.keys = {
             up: { pressed: false, doubleTap: false, timestamp: 0 },
@@ -739,13 +761,14 @@ class Controller {
             controller.paused = true;
             stars.reset();
             land.reset();
-            asteroids_reset();
+            asteroids.reset();
             spaceship.reset();
             explosion.reset();
+            game_over.reset();
             app.render();
         }
 
-        const key = keyMap[event.code];
+        const key = this.keyMap[event.code];
 
         if (!key) {
             return;
@@ -766,7 +789,7 @@ class Controller {
     }
 
     keyupHandler(event) {
-        const key = keyMap[event.code];
+        const key = this.keyMap[event.code];
 
         if (!key) {
             return;
@@ -817,14 +840,14 @@ function run() {
         spaceship.frame_advance();
 
         // update the asteroids
-        for (let asteroid of asteroids) {
+        for (let asteroid of asteroids.active) {
             asteroid.frame_advance();
         }
 
         // check for collisions between ship and anything
         let collided = false;
-        for (let a = 0; a < asteroids.length; a++) {
-            if (spaceship.shape.intersects(asteroids[a].shape)) {
+        for (let a = 0; a < asteroids.active.length; a++) {
+            if (spaceship.shape.intersects(asteroids.active[a].shape)) {
                 collided = true;
             }
         }
