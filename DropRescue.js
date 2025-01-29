@@ -191,6 +191,12 @@ let asteroids = {
         }
     },
 
+    frame_advance: function () {
+        for (let asteroid of this.active) {
+            asteroid.frame_advance();
+        }
+    },
+
     reset: function () {
         // remove all the asteroids
         for (let asteroid of this.active) {
@@ -546,6 +552,10 @@ let explosion = {
         }
     },
 
+    running: function () {
+        return this.seq != -1;
+    },
+
     frame_advance: function () {
         if (this.seq == -1) {
             return;
@@ -611,18 +621,6 @@ let spaceship = {
         this.thrust_acceleration = this.acceleration_due_to_gravity / 2;
     },
 
-    hit: function(collision) {
-        if (!this.sprite) {
-            return;
-        }
-        if (collision) {
-            this.sprite.tint = 0xff0000;
-        }
-        else {
-            this.sprite.tint = 0xffffff;
-        }
-    },
-
     frame_advance: function () {
         if (!this.sprite) {
             return;
@@ -630,14 +628,14 @@ let spaceship = {
 
         // check for placeholder left/right controller input
         if (controller.keys.right.pressed || controller.ptr.right) {
-            this.rotation += 3;
+            this.rotation += 2;
             if (this.rotation >= 360) {
                 this.rotation -= 360;
             }
             this.sprite.rotation = this.rotation * Math.PI / 180;
         }
         else if (controller.keys.left.pressed || controller.ptr.left) {
-            this.rotation -= 3;
+            this.rotation -= 2;
             if (this.rotation < 0) {
                 this.rotation += 360;
             }
@@ -836,38 +834,40 @@ app.stage.addChild(graphics);
 function run() {
     // the main game loop
     app.ticker.add((time) => {
-        // update the spaceship with the new thrust level
-        spaceship.frame_advance();
+        // advance the objects
+        asteroids.frame_advance();
+        if (!explosion.running()) {
+            spaceship.frame_advance();
 
-        // update the asteroids
-        for (let asteroid of asteroids.active) {
-            asteroid.frame_advance();
-        }
+            // check for collisions between ship and anything
+            let collided = false;
+            for (let a = 0; a < asteroids.active.length; a++) {
+                if (spaceship.shape.intersects(asteroids.active[a].shape)) {
+                    collided = true;
+                    break;
+                }
+            }
 
-        // check for collisions between ship and anything
-        let collided = false;
-        for (let a = 0; a < asteroids.active.length; a++) {
-            if (spaceship.shape.intersects(asteroids.active[a].shape)) {
-                collided = true;
+            // check for collisions between ship and land
+            if (!collided && land.shape.intersects(spaceship.shape)) {
+                if (Math.abs(spaceship.velocity.x) <= 1 && spaceship.velocity.y <= 1 && (spaceship.rotation <= 5 || spaceship.rotation >= 355)) {
+                    game_over.create();
+                    app.stop();
+                }
+                else {
+                    collided = true;
+                }
+            }
+
+            if (collided) {
+                explosion.start();
+                spaceship.end();
             }
         }
-
-        // check for collisions between ship and land
-        if (land.shape.intersects(spaceship.shape)) {
-            collided = true;
+        else {
+            explosion.frame_advance();
         }
-
-        // set the spaceship color based on collision
-        spaceship.hit(collided);
-
-        if (collided) {
-            explosion.start();
-            spaceship.end();
-        }
-        explosion.frame_advance();
     });
-
-
 
     // paint one frame if we started paused
     if (start_paused) {
